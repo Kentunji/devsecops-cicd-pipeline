@@ -1,0 +1,23 @@
+# =============================================================================
+# Gitleaks Configuration
+# =============================================================================
+# Custom rules and allowlists for secrets scanning.
+# This file extends the default Gitleaks ruleset.
+# =============================================================================
+
+title = "DevSecOps Pipeline - Gitleaks Config"
+
+[extend]
+# Use the default gitleaks rules as a base
+useDefault = true
+
+[allowlist]
+description = "Global allowlist"
+paths = [
+    '''node_modules/''',
+    '''\.git/''',
+    '''dist/''',
+    '''build/''',
+    '''\.env\.example''',
+    '''test/'''
+]

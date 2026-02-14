@@ -1,0 +1,10 @@
+# Semgrep ignore file
+# Exclude directories that shouldn't be scanned
+
+node_modules/
+dist/
+build/
+.git/
+test/
+e2e/
+coverage/
