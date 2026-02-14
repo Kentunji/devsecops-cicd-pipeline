@@ -23,7 +23,7 @@ on:
     branches: [ main ]
 
 env:
-  NODE_VERSION: '18'
+  NODE_VERSION: '20'
   IMAGE_NAME: juice-shop
   IMAGE_TAG: ${{ github.sha }}
   TRIVY_SEVERITY: CRITICAL,HIGH
