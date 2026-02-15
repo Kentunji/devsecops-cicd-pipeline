@@ -1,10 +1,10 @@
-# Semgrep ignore file
-# Exclude directories that shouldn't be scanned
+# Exclude intentional vulnerable code examples (training/CTF challenges)
+data/static/codefixes/
 
-node_modules/
-dist/
-build/
-.git/
+# Exclude test fixtures with hardcoded tokens
+frontend/src/app/**/*.spec.ts
+
+# Exclude other test files
 test/
-e2e/
-coverage/
+*.test.ts
+*.spec.ts
