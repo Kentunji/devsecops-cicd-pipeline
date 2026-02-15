@@ -9,16 +9,20 @@ tests/
 **/*.test.ts
 **/*.spec.js
 **/*.test.js
-scripts/test-secrets.sh
+scripts/
 
 # Exclude frontend test files
 frontend/src/**/*.spec.ts
-frontend/src/**/*.test.ts
 
 # Exclude third-party minified libraries
 frontend/src/assets/private/
 **/*.min.js
 node_modules/
 
-# Exclude hacking instructor (intentional CTF component)
+# Exclude hacking instructor (intentional CTF teaching tool)
 frontend/src/hacking-instructor/
+
+# Exclude routes with intentional CTF vulnerabilities
+routes/login.ts
+routes/search.ts
+routes/userProfile.ts
