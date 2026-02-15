@@ -1,17 +1,9 @@
-# DevSecOps CI/CD Pipeline - Stages 1, 2 & 3
+# DevSecOps CI/CD Pipeline - Stages 1, 2, 3 & 4
 # 
 # Stage 1: Build & Test
-#   - Automated build and test validation
-#   - Fails pipeline if tests fail
-#
-# Stage 2: Secrets Scanning
-#   - Detects hardcoded credentials using Gitleaks
-#   - Fails pipeline when secrets are detected
-#
-# Stage 3: SAST (Static Application Security Testing)
-#   - Analyzes source code for vulnerabilities using Semgrep
-#   - FAILS pipeline on critical/high severity issues
-#   - Generates security reports as artifacts
+# Stage 2: Secrets Scanning (Gitleaks)
+# Stage 3: SAST (Semgrep)
+# Stage 4: SCA / Dependency Scanning (Trivy)
 
 name: DevSecOps Pipeline
 
@@ -147,7 +139,6 @@ jobs:
       - name: Quality Gate - Check for Critical/High findings
         run: |
           if [ -f semgrep-results.json ]; then
-            # Count ERROR (critical/high) severity findings
             CRITICAL_HIGH=$(cat semgrep-results.json | python3 -c "
           import json, sys
           data = json.load(sys.stdin)
@@ -156,7 +147,6 @@ jobs:
           print(len(critical_high))
           " 2>/dev/null || echo "0")
             
-            # Count WARNING (medium) severity findings
             WARNINGS=$(cat semgrep-results.json | python3 -c "
           import json, sys
           data = json.load(sys.stdin)
@@ -195,4 +185,81 @@ jobs:
             semgrep-results.json
             semgrep-results.txt
             semgrep-results.sarif
+          retention-days: 30
+
+  # =========================================================================
+  # STAGE 4: SCA / Dependency Scanning
+  # =========================================================================
+  dependency-scan:
+    name: "Stage 4: SCA / Dependency Scan"
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run Trivy dependency scan (JSON)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'json'
+          output: 'trivy-sca-results.json'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+          exit-code: '0'
+
+      - name: Run Trivy dependency scan (Table)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'table'
+          output: 'trivy-sca-results.txt'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+          exit-code: '0'
+
+      - name: Quality Gate - Check for Critical/High vulnerabilities
+        run: |
+          if [ -f trivy-sca-results.json ]; then
+            # Count CRITICAL and HIGH vulnerabilities
+            CRITICAL_HIGH=$(cat trivy-sca-results.json | python3 -c "
+          import json, sys
+          data = json.load(sys.stdin)
+          count = 0
+          for result in data.get('Results', []):
+            for vuln in result.get('Vulnerabilities', []):
+              if vuln.get('Severity', '') in ['CRITICAL', 'HIGH']:
+                count += 1
+          print(count)
+          " 2>/dev/null || echo "0")
+            
+            echo "=========================================="
+            echo "SCA Quality Gate Results"
+            echo "=========================================="
+            echo "Critical/High vulnerabilities: $CRITICAL_HIGH"
+            echo "=========================================="
+            
+            if [ "$CRITICAL_HIGH" -gt 0 ]; then
+              echo "::error::❌ SCA Quality Gate FAILED!"
+              echo "::error::Found $CRITICAL_HIGH critical/high severity vulnerabilities in dependencies"
+              echo "::error::Review trivy-sca-results.txt for remediation steps"
+              exit 1
+            else
+              echo "✅ SCA Quality Gate PASSED"
+              echo "No critical/high severity dependency vulnerabilities"
+            fi
+          else
+            echo "::error::Trivy results file not found"
+            exit 1
+          fi
+
+      - name: Upload SCA reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sca-trivy-report
+          path: |
+            trivy-sca-results.json
+            trivy-sca-results.txt
           retention-days: 30
