@@ -1,10 +1,24 @@
-# Exclude intentional vulnerable code examples (training/CTF challenges)
+# Exclude intentional vulnerable code examples
 data/static/codefixes/
+data/static/
 
-# Exclude test fixtures with hardcoded tokens
-frontend/src/app/**/*.spec.ts
-
-# Exclude other test files
+# Exclude all test files
 test/
-*.test.ts
-*.spec.ts
+tests/
+**/*.spec.ts
+**/*.test.ts
+**/*.spec.js
+**/*.test.js
+scripts/test-secrets.sh
+
+# Exclude frontend test files
+frontend/src/**/*.spec.ts
+frontend/src/**/*.test.ts
+
+# Exclude third-party minified libraries
+frontend/src/assets/private/
+**/*.min.js
+node_modules/
+
+# Exclude hacking instructor (intentional CTF component)
+frontend/src/hacking-instructor/
