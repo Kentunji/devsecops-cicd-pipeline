@@ -1,9 +1,10 @@
-# DevSecOps CI/CD Pipeline - Stages 1, 2, 3 & 4
+# DevSecOps CI/CD Pipeline - Stages 1-5
 # 
 # Stage 1: Build & Test
 # Stage 2: Secrets Scanning (Gitleaks)
 # Stage 3: SAST (Semgrep)
 # Stage 4: SCA / Dependency Scanning (Trivy)
+# Stage 5: Container Security (Trivy)
 
 name: DevSecOps Pipeline
 
@@ -15,6 +16,8 @@ on:
 
 env:
   NODE_VERSION: '20'
+  IMAGE_NAME: juice-shop
+  IMAGE_TAG: ${{ github.sha }}
 
 jobs:
   # =========================================================================
@@ -221,7 +224,6 @@ jobs:
 
       - name: Quality Gate - Check for Critical/High vulnerabilities
         run: |
-          # Check if .trivyignore exists (risk acceptance)
           if [ -f .trivyignore ]; then
             echo "=========================================="
             echo "SCA Quality Gate - Risk Acceptance Mode"
@@ -230,7 +232,6 @@ jobs:
             echo "Vulnerabilities have been documented and accepted"
             echo ""
             
-            # Still count and report vulnerabilities
             if [ -f trivy-sca-results.json ]; then
               CRITICAL_HIGH=$(cat trivy-sca-results.json | python3 -c "
           import json, sys
@@ -250,7 +251,6 @@ jobs:
               echo "See .trivyignore for acceptance documentation"
             fi
           else
-            # Standard quality gate enforcement
             if [ -f trivy-sca-results.json ]; then
               CRITICAL_HIGH=$(cat trivy-sca-results.json | python3 -c "
           import json, sys
@@ -292,4 +292,125 @@ jobs:
           path: |
             trivy-sca-results.json
             trivy-sca-results.txt
+          retention-days: 30
+
+  # =========================================================================
+  # STAGE 5: Container Security
+  # =========================================================================
+  container-scan:
+    name: "Stage 5: Container Security"
+    runs-on: ubuntu-latest
+    needs: [build-and-test, secrets-scan, sast-scan, dependency-scan]
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build Docker image with traceable tag
+        run: |
+          echo "=========================================="
+          echo "Building Container Image"
+          echo "=========================================="
+          echo "Image Name: ${{ env.IMAGE_NAME }}"
+          echo "Traceable Tag: ${{ env.IMAGE_TAG }} (commit SHA)"
+          echo "Build Date: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          echo "=========================================="
+          
+          # Build image with commit SHA as traceable identifier
+          docker build -t ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} .
+          
+          # Also tag as latest for convenience
+          docker tag ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} ${{ env.IMAGE_NAME }}:latest
+          
+          echo "✅ Image built successfully"
+          echo "Tags created:"
+          echo "  - ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}"
+          echo "  - ${{ env.IMAGE_NAME }}:latest"
+
+      - name: Scan container image with Trivy (JSON)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: '${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}'
+          format: 'json'
+          output: 'trivy-container-results.json'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+          exit-code: '0'
+
+      - name: Scan container image with Trivy (Table)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: '${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}'
+          format: 'table'
+          output: 'trivy-container-results.txt'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+          exit-code: '0'
+
+      - name: Quality Gate - Fail on Critical/High vulnerabilities
+        run: |
+          if [ -f .trivyignore ]; then
+            echo "=========================================="
+            echo "Container Security - Risk Acceptance Mode"
+            echo "=========================================="
+            echo "⚠️  .trivyignore file detected"
+            echo ""
+            
+            if [ -f trivy-container-results.json ]; then
+              CRITICAL_HIGH=$(cat trivy-container-results.json | python3 -c "
+          import json, sys
+          data = json.load(sys.stdin)
+          count = 0
+          for result in data.get('Results', []):
+            for vuln in result.get('Vulnerabilities', []):
+              if vuln.get('Severity', '') in ['CRITICAL', 'HIGH']:
+                count += 1
+          print(count)
+          " 2>/dev/null || echo "0")
+              
+              echo "Total Critical/High container vulnerabilities: $CRITICAL_HIGH"
+              echo "Status: Accepted with documented justification"
+              echo ""
+              echo "✅ Container Security Gate PASSED (Risk Accepted)"
+            fi
+          else
+            if [ -f trivy-container-results.json ]; then
+              CRITICAL_HIGH=$(cat trivy-container-results.json | python3 -c "
+          import json, sys
+          data = json.load(sys.stdin)
+          count = 0
+          for result in data.get('Results', []):
+            for vuln in result.get('Vulnerabilities', []):
+              if vuln.get('Severity', '') in ['CRITICAL', 'HIGH']:
+                count += 1
+          print(count)
+          " 2>/dev/null || echo "0")
+              
+              echo "=========================================="
+              echo "Container Security Gate Results"
+              echo "=========================================="
+              echo "Critical/High vulnerabilities: $CRITICAL_HIGH"
+              echo "=========================================="
+              
+              if [ "$CRITICAL_HIGH" -gt 0 ]; then
+                echo "::error::❌ Container Security Gate FAILED!"
+                echo "::error::Found $CRITICAL_HIGH critical/high severity vulnerabilities"
+                echo "::error::Review trivy-container-results.txt for remediation steps"
+                exit 1
+              else
+                echo "✅ Container Security Gate PASSED"
+                echo "No critical/high severity container vulnerabilities"
+              fi
+            else
+              echo "::error::Trivy results file not found"
+              exit 1
+            fi
+          fi
+
+      - name: Upload container scan reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: container-trivy-report
+          path: |
+            trivy-container-results.json
+            trivy-container-results.txt
           retention-days: 30
