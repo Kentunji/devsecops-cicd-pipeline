@@ -10,8 +10,8 @@
 #
 # Stage 3: SAST (Static Application Security Testing)
 #   - Analyzes source code for vulnerabilities using Semgrep
-#   - Fails pipeline on critical/high severity issues
-#   - Generates security reports
+#   - FAILS pipeline on critical/high severity issues
+#   - Generates security reports as artifacts
 
 name: DevSecOps Pipeline
 
@@ -96,60 +96,103 @@ jobs:
     name: "Stage 3: SAST"
     runs-on: ubuntu-latest
     needs: build-and-test
+    container:
+      image: semgrep/semgrep
     
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Run Semgrep security scan
-        uses: semgrep/semgrep-action@v1
-        with:
-          config: >-
-            p/default
-            p/javascript
-            p/typescript
-            p/nodejs
-            p/owasp-top-ten
-            p/security-audit
-        env:
-          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
-        continue-on-error: true
+      - name: Run Semgrep scan (JSON output)
+        run: |
+          semgrep scan \
+            --config auto \
+            --config p/javascript \
+            --config p/typescript \
+            --config p/nodejs \
+            --config p/owasp-top-ten \
+            --config p/security-audit \
+            --json \
+            --output semgrep-results.json \
+            . || true
 
-      - name: Upload Semgrep results
+      - name: Run Semgrep scan (readable report)
+        if: always()
+        run: |
+          semgrep scan \
+            --config auto \
+            --config p/javascript \
+            --config p/typescript \
+            --config p/nodejs \
+            --config p/owasp-top-ten \
+            --config p/security-audit \
+            --text \
+            --output semgrep-results.txt \
+            . || true
+
+      - name: Generate SARIF report
+        if: always()
+        run: |
+          semgrep scan \
+            --config auto \
+            --config p/javascript \
+            --config p/typescript \
+            --config p/nodejs \
+            --config p/owasp-top-ten \
+            --config p/security-audit \
+            --sarif \
+            --output semgrep-results.sarif \
+            . || true
+
+      - name: Quality Gate - Check for Critical/High findings
+        run: |
+          if [ -f semgrep-results.json ]; then
+            # Count ERROR (critical/high) severity findings
+            CRITICAL_HIGH=$(cat semgrep-results.json | python3 -c "
+          import json, sys
+          data = json.load(sys.stdin)
+          results = data.get('results', [])
+          critical_high = [r for r in results if r.get('extra', {}).get('severity', '') == 'ERROR']
+          print(len(critical_high))
+          " 2>/dev/null || echo "0")
+            
+            # Count WARNING (medium) severity findings
+            WARNINGS=$(cat semgrep-results.json | python3 -c "
+          import json, sys
+          data = json.load(sys.stdin)
+          results = data.get('results', [])
+          warnings = [r for r in results if r.get('extra', {}).get('severity', '') == 'WARNING']
+          print(len(warnings))
+          " 2>/dev/null || echo "0")
+            
+            echo "=========================================="
+            echo "SAST Quality Gate Results"
+            echo "=========================================="
+            echo "Critical/High (ERROR): $CRITICAL_HIGH"
+            echo "Medium (WARNING): $WARNINGS"
+            echo "=========================================="
+            
+            if [ "$CRITICAL_HIGH" -gt 0 ]; then
+              echo "::error::❌ SAST Quality Gate FAILED!"
+              echo "::error::Found $CRITICAL_HIGH critical/high severity issues"
+              echo "::error::Review semgrep-results.txt for details"
+              exit 1
+            else
+              echo "✅ SAST Quality Gate PASSED"
+              echo "No critical/high severity issues found"
+            fi
+          else
+            echo "::error::Semgrep results file not found"
+            exit 1
+          fi
+
+      - name: Upload SAST reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: semgrep-report
-          path: semgrep.sarif
+          name: sast-semgrep-report
+          path: |
+            semgrep-results.json
+            semgrep-results.txt
+            semgrep-results.sarif
           retention-days: 30
-
-      - name: Check for critical/high severity findings
-        run: |
-          if [ -f semgrep.sarif ]; then
-            # Count critical/high findings from SARIF
-            CRITICAL_HIGH=$(cat semgrep.sarif | python3 -c "
-          import json, sys
-          try:
-            data = json.load(sys.stdin)
-            count = 0
-            for run in data.get('runs', []):
-              for result in run.get('results', []):
-                level = result.get('level', 'note')
-                if level in ['error', 'warning']:
-                  count += 1
-            print(count)
-          except:
-            print(0)
-          " 2>/dev/null || echo "0")
-            
-            echo "Critical/High severity findings: $CRITICAL_HIGH"
-            
-            if [ "$CRITICAL_HIGH" -gt 0 ]; then
-              echo "::warning::SAST found $CRITICAL_HIGH critical/high severity issues"
-              echo "Review the semgrep-report artifact for details"
-            else
-              echo "✅ No critical/high severity issues found"
-            fi
-          else
-            echo "⚠️ SARIF report not found, skipping quality gate check"
-          fi
