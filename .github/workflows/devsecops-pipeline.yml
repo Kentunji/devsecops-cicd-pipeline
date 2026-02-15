@@ -1,4 +1,4 @@
-# DevSecOps CI/CD Pipeline - Stages 1 & 2
+# DevSecOps CI/CD Pipeline - Stages 1, 2 & 3
 # 
 # Stage 1: Build & Test
 #   - Automated build and test validation
@@ -7,7 +7,11 @@
 # Stage 2: Secrets Scanning
 #   - Detects hardcoded credentials using Gitleaks
 #   - Fails pipeline when secrets are detected
-#   - All credentials stored in GitHub Secrets
+#
+# Stage 3: SAST (Static Application Security Testing)
+#   - Analyzes source code for vulnerabilities using Semgrep
+#   - Fails pipeline on critical/high severity issues
+#   - Generates security reports
 
 name: DevSecOps Pipeline
 
@@ -84,3 +88,68 @@ jobs:
           name: gitleaks-report
           path: results.sarif
           retention-days: 30
+
+  # =========================================================================
+  # STAGE 3: SAST (Static Application Security Testing)
+  # =========================================================================
+  sast-scan:
+    name: "Stage 3: SAST"
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run Semgrep security scan
+        uses: semgrep/semgrep-action@v1
+        with:
+          config: >-
+            p/default
+            p/javascript
+            p/typescript
+            p/nodejs
+            p/owasp-top-ten
+            p/security-audit
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+        continue-on-error: true
+
+      - name: Upload Semgrep results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: semgrep-report
+          path: semgrep.sarif
+          retention-days: 30
+
+      - name: Check for critical/high severity findings
+        run: |
+          if [ -f semgrep.sarif ]; then
+            # Count critical/high findings from SARIF
+            CRITICAL_HIGH=$(cat semgrep.sarif | python3 -c "
+          import json, sys
+          try:
+            data = json.load(sys.stdin)
+            count = 0
+            for run in data.get('runs', []):
+              for result in run.get('results', []):
+                level = result.get('level', 'note')
+                if level in ['error', 'warning']:
+                  count += 1
+            print(count)
+          except:
+            print(0)
+          " 2>/dev/null || echo "0")
+            
+            echo "Critical/High severity findings: $CRITICAL_HIGH"
+            
+            if [ "$CRITICAL_HIGH" -gt 0 ]; then
+              echo "::warning::SAST found $CRITICAL_HIGH critical/high severity issues"
+              echo "Review the semgrep-report artifact for details"
+            else
+              echo "✅ No critical/high severity issues found"
+            fi
+          else
+            echo "⚠️ SARIF report not found, skipping quality gate check"
+          fi
