@@ -149,4 +149,4 @@ This project is for educational purposes as part of the DevSecOps CI/CD Lab.
 
 ---
 
-*Built by Kehinde as part of the Security and Network Engineering Master's program at Innopolis University.*
+*Built by Kehinde Adetunji as part of the Security and Network Engineering Master's program at Innopolis University.*
